@@ -117,38 +117,29 @@ from flask_cors import CORS
 from database import db, LocationHistory, HistoricalPlace
 from writer import load_qwen_model, write_history, extract_historical_places
 
-
-# -------------------------------------------------------
-# 🔧 Flask App Configuration
-# -------------------------------------------------------
 def create_app():
     app = Flask(__name__)
 
-    # ✅ Configuration
+    # -------------------- Configuration --------------------
     app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
         "DATABASE_URL", "sqlite:///locations.db"
     )
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-    app.config["CACHE_TYPE"] = "SimpleCache"  # You can switch to RedisCache for scale
-    app.config["CACHE_DEFAULT_TIMEOUT"] = 3600  # 1 hour cache
+    app.config["CACHE_TYPE"] = "SimpleCache"
+    app.config["CACHE_DEFAULT_TIMEOUT"] = 3600
 
     db.init_app(app)
     cache = Cache(app)
-    CORS(app)  # Allow cross-origin for frontend access
+    CORS(app)
 
-    # ✅ Structured logging
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[
-            logging.FileHandler("app.log"),
-            logging.StreamHandler(),
-        ],
+        handlers=[logging.FileHandler("app.log"), logging.StreamHandler()],
     )
-
     logger = logging.getLogger(__name__)
 
-    # ✅ Load model once globally
+    # -------------------- Load Model --------------------
     try:
         logger.info("Loading Qwen model...")
         model, tokenizer = load_qwen_model()
@@ -157,11 +148,9 @@ def create_app():
         logger.error(f"Failed to load model: {e}")
         model, tokenizer = None, None
 
-    # -------------------------------------------------------
-    # 🕰️ API 1: Get or Generate Location History
-    # -------------------------------------------------------
+    # -------------------- API: Get Location History --------------------
     @app.route("/api/history/<string:location>", methods=["GET"])
-    @cache.cached()  # 🔥 Cache the endpoint
+    @cache.cached()
     def get_location_history(location):
         try:
             logger.info(f"Request received for history: {location}")
@@ -170,7 +159,6 @@ def create_app():
             ).first()
 
             if existing and existing.description:
-                logger.info(f"Cache hit for location: {location}")
                 return jsonify({
                     "source": "database",
                     "location": existing.place_name,
@@ -202,9 +190,7 @@ def create_app():
             logger.exception("Error in get_location_history")
             return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
 
-    # -------------------------------------------------------
-    # 🏛️ API 2: Get or Generate Historical Places
-    # -------------------------------------------------------
+    # -------------------- API: Get Historical Places --------------------
     @app.route("/api/historical_places/<string:location>", methods=["GET"])
     @cache.cached()
     def get_historical_places(location):
@@ -214,17 +200,16 @@ def create_app():
                 LocationHistory.place_name.ilike(location)
             ).first()
 
-            if loc_entry and loc_entry.historical_places:
-                places_data = [
-                    {"name": p.name, "description": p.description}
-                    for p in loc_entry.historical_places
-                ]
-                logger.info(f"Found cached historical places for: {location}")
-                return jsonify({
-                    "source": "database",
-                    "location": location,
-                    "historical_places": places_data
-                }), 200
+            # Check manually if historical places exist
+            if loc_entry:
+                places_data = HistoricalPlace.query.filter_by(location_id=loc_entry.id).all()
+                if places_data:
+                    result_list = [{"name": p.name, "description": p.description} for p in places_data]
+                    return jsonify({
+                        "source": "database",
+                        "location": location,
+                        "historical_places": result_list
+                    }), 200
 
             if not model or not tokenizer:
                 return jsonify({"error": "Model not loaded"}), 500
@@ -242,11 +227,12 @@ def create_app():
                 db.session.add(loc_entry)
                 db.session.commit()
 
+            # Add places manually with location_id
             for name in places_list:
                 new_place = HistoricalPlace(
                     location_id=loc_entry.id,
                     name=name,
-                    description=f"One of the historical sites near {location}."
+                    description=f"Historical place near {location}"
                 )
                 db.session.add(new_place)
             db.session.commit()
@@ -262,25 +248,20 @@ def create_app():
             logger.exception("Error in get_historical_places")
             return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
 
-    # -------------------------------------------------------
-    # Health Check Endpoint
-    # -------------------------------------------------------
+    # -------------------- Health Check --------------------
     @app.route("/health", methods=["GET"])
     def health_check():
         return jsonify({"status": "ok"}), 200
 
-    # -------------------------------------------------------
-    # Initialize Database
-    # -------------------------------------------------------
+    # -------------------- Initialize DB --------------------
     with app.app_context():
         db.create_all()
 
     return app
 
 
-# -------------------------------------------------------
-# Run with Gunicorn (Production)
-# -------------------------------------------------------
 if __name__ == "__main__":
     app = create_app()
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=8888, debug=False)
+
+
