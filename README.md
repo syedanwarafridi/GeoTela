@@ -109,8 +109,8 @@ GET https://nab6wk9x0oev1u-8888.proxy.runpod.net/api/historical_places/London
 ## 🛠️ Setup Instructions
 
 ```bash
-git clone https://github.com/yourusername/location-history-api.git
-cd location-history-api
+git clone https://github.com/syedanwarafridi/GeoTela
+cd GeoTela
 pip install -r requirements.txt
 flask run
 ```
